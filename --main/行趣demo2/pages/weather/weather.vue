@@ -228,57 +228,30 @@ export default {
         // 使用坐标获取天气数据
         async getWeatherByCoords() {
             try {
-                // 获取天气数据
-                const weatherResponse = await uni.request({
-                    url: 'https://api.openweathermap.org/data/2.5/weather',
-                    method: 'GET',
+                const res = await uniCloud.callFunction({
+                    name: 'getWeatherByCoords',
                     data: {
                         lat: this.location.lat,
                         lon: this.location.lon,
-                        appid: this.apiConfig.openWeatherKey,
-                        units: this.apiConfig.units,
-                        lang: this.apiConfig.lang
-                    },
-					
-                });
-        
-                console.log('Weather API Response:', weatherResponse.data);  // 输出响应数据
-        
-                // 获取空气质量数据
-                const airResponse = await uni.request({
-                    url: 'http://api.openweathermap.org/data/2.5/air_pollution',
-                    method: 'GET',
-                    data: {
-                        lat: this.location.lat,
-                        lon: this.location.lon,
-                        appid: this.apiConfig.openWeatherKey
+						OPENWEATHER_API_KEY: this.apiConfig.openWeatherKey
                     }
                 });
         
-                console.log('Air Quality API Response:', airResponse.data);  // 输出空气质量数据
-
-				const forecastResponse = await uni.request({
-                    url: 'http://api.openweathermap.org/data/2.5/forecast',
-                    method: 'GET',
-                    data: {
-                        lat: this.location.lat,
-                        lon: this.location.lon,
-                        appid: this.apiConfig.openWeatherKey
-                    }
-                });
-        
-                console.log('Forecast API Response:', forecastResponse.data);  // 输出未来五天天气数据     
-				
-                // 确保数据格式正确再更新天气
-                if (weatherResponse.statusCode === 200 && weatherResponse.data) {
-                    this.updateWeatherData(weatherResponse.data, airResponse.data, forecastResponse.data);
-                } else {
-                    console.error('Weather data is missing or incorrect');
+                if (res.result.error) {
                     uni.showToast({
-                        title: '获取天气数据失败',
+                        title: res.result.error,
                         icon: 'none'
                     });
+                    return;
                 }
+        
+                const { weatherData, airData, forecastData } = res.result;
+				console.log('天气数据:', weatherData);
+				console.log('空气数据:',airData);
+				console.log('未来五天预测数据:',forecastData);
+                // 处理数据
+                this.updateWeatherData(weatherData, airData, forecastData);
+        
             } catch (error) {
                 console.error('获取天气数据失败:', error);
                 uni.showToast({
@@ -372,12 +345,40 @@ export default {
 //  需求编号： WT-FR-003，系统应根据用户的旅行日期预测未来天气。
         // 格式化预报数据
         formatForecastData(dailyData) {
-            return dailyData.slice(0, 5).map(day => ({
-                date: this.formatForecastDate(day.dt),
-                dayWeather: day.weather[0].description,
-                tempMin: Math.round(day.main.temp_min),
-                tempMax: Math.round(day.main.temp_max)
-            }));
+            // 按日期分组
+			const groupedData = dailyData.reduce((acc, day) => {
+				const date = this.formatForecastDate(day.dt);  // 格式化日期（如：2024-11-15）
+		
+				// 如果当天的数据组还不存在，则初始化
+				if (!acc[date]) {
+					acc[date] = {
+						date: date,
+						weather: day.weather[0].description,
+						tempMin: day.main.temp_min - 273.15,
+						tempMax: day.main.temp_max - 273.15
+					};
+				} else {
+					// 否则更新当天的温度范围
+					if (day.main.temp_min < acc[date].tempMin) {
+						acc[date].tempMin = day.main.temp_min - 273.15;
+					}
+					if (day.main.temp_max > acc[date].tempMax) {
+						acc[date].tempMax = day.main.temp_max - 273.15;
+					}
+				}
+		
+				return acc;
+			}, {});
+		
+			// 获取前五天的天气
+			const forecast = Object.values(groupedData).slice(0, 5).map(day => ({
+				date: day.date,
+				dayWeather: day.weather,
+				tempMin: Math.round(day.tempMin),
+				tempMax: Math.round(day.tempMax)
+			}));
+            
+            return forecast;
         },
 
         // 格式化预报日期
